@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Mitsy's Revenge</title>
+<style>
+  :root{
+    --ui: #111; --bg:#0b0b0b; --card:#ffffff; --accent:#32cd32; --muted:#777;
+    --hud:#ffffff; --toast:#222; --toastText:#fff;
+  }
+  html,body{margin:0;height:100%;background:#000;color:#fff;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+  #root{position:relative;height:100vh;overflow:hidden}
+  canvas{display:block;width:100vw;height:100vh;background:#000}
+
+  /* Splash */
+  #splash, #introWrap, #endScreen {position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:#000;}
+  #splash.hidden, #introWrap.hidden, #endScreen.hidden {display:none;}
+  .splash-card{
+    position:relative; width:min(100vw,1280px); height:min(100vh,720px); box-shadow:0 10px 40px rgba(0,0,0,.5);
+    display:flex; align-items:flex-end; justify-content:center; background:#000; overflow:hidden; border-radius:10px;
+  }
+  .splash-card img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover;}
+  .splash-overlay{position:relative; z-index:2; width:100%; padding:24px; background:linear-gradient(180deg, rgba(0,0,0,0) 0%, rgba(0,0,0,.75) 40%, rgba(0,0,0,.9) 100%);}
+  .title{font-size:clamp(28px,5vw,48px); font-weight:800; letter-spacing:.5px; margin:0 0 8px}
+  .tag{font-size:clamp(14px,2.2vw,18px); color:#e6e6e6; margin:0 0 16px}
+  .controls{font-size:clamp(13px,2vw,16px); color:#cfcfcf; line-height:1.5; margin:0 0 14px}
+  .goal{font-size:clamp(13px,2vw,16px); color:#ddd; margin:0 0 18px}
+  .btn{appearance:none; border:none; padding:14px 18px; border-radius:10px; font-weight:700; cursor:pointer; background:#fff; color:#111; font-size:clamp(14px,2.4vw,18px)}
+  .btn:active{transform:translateY(1px)}
+  .mute{position:absolute; top:16px; right:16px; background:rgba(0,0,0,.5); color:#fff; border:1px solid rgba(255,255,255,.15); padding:8px 10px; border-radius:8px; cursor:pointer; font-size:14px; z-index:3}
+
+  /* HUD */
+  #hud{position:absolute; inset:0; pointer-events:none; font-weight:700;}
+  .hud-left, .hud-right, .hud-center{position:absolute; top:12px; padding:8px 10px; background:rgba(0,0,0,.35); border-radius:8px; backdrop-filter: blur(4px); border:1px solid rgba(255,255,255,.1)}
+  .hud-left{left:12px}
+  .hud-right{right:12px}
+  .hud-center{left:50%; transform:translateX(-50%);}
+  .green{color: var(--accent)}
+  #toast{position:absolute; left:50%; transform:translateX(-50%); bottom:24px; background:var(--toast); color:var(--toastText); padding:10px 14px; border-radius:10px; opacity:0; transition:opacity .25s}
+  #toast.show{opacity:1}
+  #bubble{position:absolute; min-width: 120px; max-width: 60vw; background:#fff; color:#000; padding:10px 12px; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,.4); opacity:0; transform:translate(-50%,-100%); transition:opacity .2s; pointer-events:none; font-weight:600}
+
+  /* On-screen smoke button (for mouse/touch) */
+  #smokeBtn{position:absolute; right:12px; bottom:12px; padding:12px 16px; border-radius:12px; border:none; background:#fff; color:#111; font-weight:800; cursor:pointer; z-index:2}
+  #smokeBtn.hidden{display:none}
+
+  /* Intro video */
+  #introWrap video{width:min(100vw,1280px); height:min(100vh,720px); background:#000; border-radius:10px}
+
+  /* End */
+  #endScreen .card{padding:22px; text-align:center}
+  #endScreen h1{font-size:clamp(26px,5vw,42px); margin:0 0 10px}
+  #endScreen p{color:#ddd; margin:0 0 16px}
+</style>
+</head>
+<body>
+<div id="root">
+  <canvas id="game" width="1280" height="720"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-left"><span id="nugsLabel">Nugs </span><span id="nugsCount">0</span><span>/2</span></div>
+    <div class="hud-right">Smoked: <span id="smokedCount">0</span></div>
+    <div class="hud-center">Goal <span id="goalNow">0</span>/30</div>
+    <div id="toast">Inventory: Blazable.</div>
+    <div id="bubble"></div>
+    <button id="smokeBtn">SMOKE (S)</button>
+  </div>
+
+  <!-- Splash -->
+  <div id="splash">
+    <button class="mute" id="muteToggle" aria-label="Toggle sound">🔊 Sound On</button>
+    <div class="splash-card">
+      <img src="splash image.png" alt="Mitsy's Revenge splash" />
+      <div class="splash-overlay">
+        <h1 class="title">Mitsy's Revenge</h1>
+        <p class="tag">Collect nugs, blaze when you’ve got two, smoke it up.</p>
+        <p class="controls">Controls: <b>A / D</b> move, <b>Space</b> jump, <b>S</b> smoke (when 2+ nugs).</p>
+        <p class="goal">Goal: Collect <b>30</b> nugs. Every <b>3rd smoke</b> plays a special sound.</p>
+        <button class="btn" id="startBtn">Start &amp; Watch Intro</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Intro video (no skip) -->
+  <div id="introWrap" class="hidden">
+    <video id="introVid" playsinline preload="auto" src="intro video.mp4"></video>
+  </div>
+
+  <!-- End screen -->
+  <div id="endScreen" class="hidden">
+    <div class="card">
+      <h1>mitsy is too stoned to continue</h1>
+      <p>Thanks for playing.</p>
+      <button class="btn" onclick="location.reload()">Play Again</button>
+    </div>
+  </div>
+
+  <!-- Audio -->
+  <audio id="music" preload="auto" src="Welcome to...The Streets of Aberdeen .mp3"></audio>
+  <audio id="sfxBonus1" preload="auto" src="Recording (16).m4a"></audio>
+  <audio id="sfxBonus2" preload="auto" src="Recording (17).m4a"></audio>
+  <audio id="sfxBonus3" preload="auto" src="Recording (18).m4a"></audio>
+  <audio id="sfxBonus4" preload="auto" src="Recording (19).m4a"></audio>
+</div>
+
+<script>
+/* ======= CONFIG ======= */
+const WORLD = { w: 3200, h: 720 };     // simple side-scroll
+const GRAVITY = 2000;                   // px/s^2
+const MOVE_SPEED = 480;                 // px/s
+const JUMP_VELOCITY = 900;              // px/s
+const CAT_SPRITE_W = 450, CAT_SPRITE_H = 300; // your canvas size
+const SCALE = 0.55;                      // draw scale so cat fits screen nicely
+const GOAL_NUGS = 30;                   // 30 nugs -> 15 smokes
+const SMOKE_COST = 2;
+const BUBBLE_TIME = 1700;               // ms
+const SMOKE_COOLDOWN = 900;             // ms
+const TOAST_TIME = 1600;                // ms
+const FLOOR_Y = 620;                    // ground level
+const CATCHPHRASES = [
+  "Jackpot! That’s some primo meowijuana.",
+  "One man’s weed… is every cat’s weed.",
+  "This batch smells like trouble… and I’m into it.",
+  "Purr-fection in plant form.",
+  "Hydroponics? More like hydropurr-nics.",
+  "Snoop Dogg? More like Snoop Cat.",
+  "Mine. Mine. Also mine.",
+  "Nobody’s taking this from me. Not even the vacuum.",
+  "I’ll bury this later… maybe in the litter box.",
+  "I like my buds big and sticky.",
+  "I’ve been a naughty pussy.",
+  "This pussy’s out of control.",
+  "This pussy’s lit.",
+  "I hope it doesn’t rain… or we’ll have a wet pussy on our hands.",
+  "What’s a cat’s favorite film genre? ‘Cat-nip-and-chill’ movies."
+];
+// shuffle once, no repeats
+function shuffle(arr){ for(let i=arr.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];} return arr; }
+const PHRASES = shuffle([...CATCHPHRASES]);
+
+/* ======= DOM ======= */
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+const hudNugs = document.getElementById('nugsCount');
+const hudSmoked = document.getElementById('smokedCount');
+const hudGoal = document.getElementById('goalNow');
+const toast = document.getElementById('toast');
+const bubble = document.getElementById('bubble');
+const smokeBtn = document.getElementById('smokeBtn');
+const splash = document.getElementById('splash');
+const startBtn = document.getElementById('startBtn');
+const introWrap = document.getElementById('introWrap');
+const introVid = document.getElementById('introVid');
+const endScreen = document.getElementById('endScreen');
+const music = document.getElementById('music');
+const muteToggle = document.getElementById('muteToggle');
+
+const sfxList = [
+  document.getElementById('sfxBonus1'),
+  document.getElementById('sfxBonus2'),
+  document.getElementById('sfxBonus3'),
+  document.getElementById('sfxBonus4'),
+];
+let lastBonusIdx = -1;
+
+let muted = false;
+function updateMuteUI(){
+  muteToggle.textContent = muted ? "🔈 Sound Off" : "🔊 Sound On";
+  music.muted = muted;
+  sfxList.forEach(a => a.muted = muted);
+}
+
+/* ======= INPUT ======= */
+const keys = { a:false, d:false, space:false, s:false };
+document.addEventListener('keydown', e=>{
+  if(e.code==='KeyA') keys.a = true;
+  if(e.code==='KeyD') keys.d = true;
+  if(e.code==='Space') keys.space = true;
+  if(e.code==='KeyS') keys.s = true;
+});
+document.addEventListener('keyup', e=>{
+  if(e.code==='KeyA') keys.a = false;
+  if(e.code==='KeyD') keys.d = false;
+  if(e.code==='Space') keys.space = false;
+  if(e.code==='KeyS') keys.s = false;
+});
+smokeBtn.addEventListener('click', ()=> trySmoke());
+
+/* ======= ASSETS ======= */
+const img = {
+  bg: loadImage('bg.png'),
+  catWalk: loadImage('walk.png'),
+  catSit: loadImage('sit.png'),
+  catSmoke: loadImage('smoke.png'),
+  nugWeed: loadImage('weed.png'),
+  nugJoint: loadImage('joint.png'),
+  nugBong: loadImage('bong.png'),
+};
+function loadImage(src){ const i=new Image(); i.src = src; return i; }
+
+/* ======= GAME STATE ======= */
+const state = {
+  camX: 0,
+  cat: {
+    x: 120, y: FLOOR_Y, vx: 0, vy: 0,
+    onGround: true,
+    facing: 1, // 1 right, -1 left
+    sitTimer: 0,
+    smokeTimer: 0,
+    sprite: 'walk', // 'walk' | 'sit' | 'smoke'
+    canSmoke: false,
+    nextPhraseIdx: 0,
+    smokedCount: 0,
+    nuggets: 0,
+    lastInputTime: performance.now(),
+  },
+  nuggets: [], // {x,y,type}
+  goal: 0,
+  finished: false,
+  started: false
+};
+
+// Scatter some pickups across the world
+function spawnPickups(){
+  const types = ['weed','joint','bong'];
+  const placements = [
+    // x, y (top of floor/platform). Keep simple: floor or light hops
+    300, 550,   520, 550,   740, 550,
+    900, 480,   1060, 420,  1220, 550,
+    1380, 550,  1520, 480,  1680, 550,
+    1860, 550,  2040, 420,  2220, 550,
+    2400, 550,  2600, 480,  2780, 550,
+    2940, 550,  3080, 550
+  ];
+  state.nuggets.length = 0;
+  for(let i=0;i<placements.length;i+=2){
+    const x = placements[i], y = placements[i+1];
+    const type = types[Math.floor(Math.random()*types.length)];
+    state.nuggets.push({x,y,type, taken:false});
+  }
+  state.goal = Math.min(GOAL_NUGS, state.nuggets.length); // in case fewer placed
+}
+spawnPickups();
+
+/* ======= SPLASH / INTRO ======= */
+startBtn.addEventListener('click', async ()=>{
+  // user gesture: start music + video
+  try{ await music.play(); }catch{}
+  splash.classList.add('hidden');
+  introWrap.classList.remove('hidden');
+  try{
+    await introVid.play();
+  }catch{
+    // if blocked, show tap overlay or fall-through
+    introVid.addEventListener('click', ()=> introVid.play(), {once:true});
+  }
+});
+introVid.addEventListener('ended', ()=>{
+  introWrap.classList.add('hidden');
+  startGame();
+});
+
+muteToggle.addEventListener('click', ()=>{
+  muted = !muted;
+  updateMuteUI();
+});
+
+/* ======= CORE GAME ======= */
+function startGame(){
+  state.started = true;
+  updateMuteUI();
+  requestAnimationFrame(loop);
+}
+
+let last = performance.now();
+function loop(t){
+  const dt = Math.min(0.033, (t - last) / 1000);
+  last = t;
+  update(dt);
+  render();
+  if(!state.finished) requestAnimationFrame(loop);
+}
+
+function update(dt){
+  const c = state.cat;
+
+  // Idle -> sit if no input
+  const hasInput = keys.a || keys.d || keys.space || keys.s;
+  if(hasInput) c.lastInputTime = performance.now();
+
+  // movement
+  c.vx = 0;
+  if(keys.a){ c.vx = -MOVE_SPEED; c.facing = -1; }
+  if(keys.d){ c.vx =  MOVE_SPEED; c.facing =  1; }
+
+  // jump
+  if(keys.space && c.onGround){
+    c.vy = -JUMP_VELOCITY;
+    c.onGround = false;
+  }
+
+  // gravity
+  c.vy += GRAVITY * dt;
+  c.x += c.vx * dt;
+  c.y += c.vy * dt;
+
+  // floor collide
+  if(c.y >= FLOOR_Y){
+    c.y = FLOOR_Y;
+    c.vy = 0;
+    c.onGround = true;
+  }
+
+  // world bounds
+  c.x = Math.max(40, Math.min(WORLD.w-40, c.x));
+
+  // sprite state
+  if(c.smokeTimer > 0){
+    c.sprite = 'smoke';
+    c.smokeTimer -= dt*1000;
+  } else {
+    // sit after 1.2s of no input
+    if(performance.now() - c.lastInputTime > 1200 && c.onGround && c.vx === 0){
+      c.sprite = 'sit';
+    } else {
+      c.sprite = 'walk';
+    }
+  }
+
+  // camera follow
+  const viewW = canvas.width;
+  const targetCam = Math.max(0, Math.min(WORLD.w - viewW, c.x - viewW*0.4));
+  state.camX += (targetCam - state.camX) * 0.08;
+
+  // pickups
+  for(const p of state.nuggets){
+    if(p.taken) continue;
+    if(Math.abs((p.x) - c.x) < 60 && Math.abs((p.y) - c.y) < 80){
+      p.taken = true;
+      state.cat.nuggets++;
+      hudNugs.textContent = state.cat.nuggets;
+      hudGoal.textContent = Math.min(state.cat.smokedCount*2 + state.cat.nuggets, GOAL_NUGS);
+      // toast if now enough to smoke
+      if(state.cat.nuggets >= SMOKE_COST){
+        showToast(randomToast());
+        smokeBtn.classList.remove('hidden');
+      }
+      // finish?
+      const collected = state.cat.smokedCount*2 + state.cat.nuggets;
+      if(collected >= GOAL_NUGS){
+        finishGame();
+        return;
+      }
+    }
+  }
+
+  // smoke input
+  if(keys.s){ trySmoke(); keys.s=false; }
+}
+
+function trySmoke(){
+  const c = state.cat;
+  if(state.finished) return;
+  if(c.smokeTimer > 0) return;
+  if(c.nuggets < SMOKE_COST) return;
+  // spend
+  c.nuggets -= SMOKE_COST;
+  hudNugs.textContent = c.nuggets;
+  // show bubble phrase (no repeats; aligned above cat)
+  const phrase = PHRASES[c.nextPhraseIdx] || "";
+  c.nextPhraseIdx = Math.min(PHRASES.length-1, c.nextPhraseIdx+1);
+  showBubble(phrase, c.x, c.y - 120);
+
+  c.smokedCount++;
+  hudSmoked.textContent = c.smokedCount;
+  hudGoal.textContent = Math.min(c.smokedCount*2 + c.nuggets, GOAL_NUGS);
+
+  // every 3rd smoke: random bonus sfx, no immediate repeats
+  if(c.smokedCount % 3 === 0){
+    let idx;
+    do{ idx = Math.floor(Math.random()*sfxList.length); } while(idx === lastBonusIdx && sfxList.length>1);
+    lastBonusIdx = idx;
+    try{ sfxList[idx].currentTime = 0; sfxList[idx].play(); }catch{}
+  }
+
+  // visual state
+  c.smokeTimer = SMOKE_COOLDOWN;
+  // if nuggets fell to <2, hide on-screen button
+  if(c.nuggets < SMOKE_COST) smokeBtn.classList.add('hidden');
+}
+
+function finishGame(){
+  state.finished = true;
+  // brief fade-out
+  setTimeout(()=>{ endScreen.classList.remove('hidden'); }, 400);
+}
+
+/* ======= UI helpers ======= */
+function showToast(text){
+  toast.textContent = text;
+  toast.classList.add('show');
+  setTimeout(()=>toast.classList.remove('show'), TOAST_TIME);
+}
+function randomToast(){
+  const lines = [
+    "Inventory: Blazable.",
+    "Two nugs make a right.",
+    "Papers ready. Cat steady.",
+    "It’s light-’er time."
+  ];
+  return lines[Math.floor(Math.random()*lines.length)];
+}
+function showBubble(text, worldX, worldY){
+  if(!text) return;
+  bubble.textContent = text;
+  bubble.style.left = ( (worldX - state.camX) * (canvas.clientWidth/canvas.width) ) + "px";
+  bubble.style.top  = ( (worldY) * (canvas.clientHeight/canvas.height) ) + "px";
+  bubble.style.opacity = 1;
+  setTimeout(()=>{ bubble.style.opacity = 0; }, BUBBLE_TIME);
+}
+
+/* ======= RENDER ======= */
+function render(){
+  // scale for crispness
+  ctx.imageSmoothingEnabled = true;
+
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // bg (parallax-lite)
+  if(img.bg.complete){
+    // tile/stretch background to screen; keep simple
+    ctx.drawImage(img.bg, -state.camX*0.2, 0, canvas.width*1.2, canvas.height);
+  }else{
+    ctx.fillStyle = "#222"; ctx.fillRect(0,0,canvas.width,canvas.height);
+  }
+
+  // simple ground and a few platforms for variety
+  ctx.fillStyle = "#1c1c1c";
+  ctx.fillRect(-state.camX, FLOOR_Y+40, canvas.width+200, 200); // deep ground
+  // lightweight visual platforms (non-colliding, just flavor)
+
+  // pickups
+  for(const p of state.nuggets){
+    if(p.taken) continue;
+    const s = 0.35; // draw smaller than cat canvas
+    const dx = (p.x - state.camX), dy = p.y;
+    let sprite = img.nugWeed;
+    if(p.type==='joint') sprite = img.nugJoint;
+    else if(p.type==='bong') sprite = img.nugBong;
+    if(sprite.complete){
+      ctx.drawImage(sprite, dx - (CAT_SPRITE_W*s)/2, dy - CAT_SPRITE_H*s, CAT_SPRITE_W*s, CAT_SPRITE_H*s);
+    }
+  }
+
+  // cat
+  const c = state.cat;
+  let catImg = img.catWalk;
+  if(c.sprite==='sit') catImg = img.catSit;
+  if(c.sprite==='smoke') catImg = img.catSmoke;
+  const drawW = CAT_SPRITE_W * SCALE, drawH = CAT_SPRITE_H * SCALE;
+  ctx.save();
+  ctx.translate( (c.x - state.camX), c.y );
+  ctx.scale(c.facing, 1);
+  // gentle bob while walking
+  let bob = 0;
+  if(c.sprite==='walk' && Math.abs(c.vx)>1) bob = Math.sin(performance.now()/100) * 2;
+  ctx.drawImage(catImg, -drawW/2, -drawH + bob, drawW, drawH);
+  ctx.restore();
+}
+
+/* ======= INIT HUD ======= */
+hudNugs.textContent = state.cat.nuggets;
+hudSmoked.textContent = state.cat.smokedCount;
+hudGoal.textContent = 0;
+smokeBtn.classList.add('hidden');
+updateMuteUI();
+
+</script>
+</body>
+</html>
